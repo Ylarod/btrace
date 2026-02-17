@@ -28,11 +28,12 @@ type Filter struct {
 }
 
 type Config struct {
-	PackageName  string          `json:"package_name"`
-	Args         bool            `json:"args"`
-	FileName     string          `json:"file_name"`
+	PackageName   string         `json:"package_name"`
+	Args          bool           `json:"args"`
+	CaptureReply  bool           `json:"capture_reply"`
+	FileName      string         `json:"file_name"`
 	CustomMethods MethodMappings `json:"customMethods"`
-	Filters      []Filter        `json:"filters"`
+	Filters       []Filter       `json:"filters"`
 }
 
 func parseFlags() (Config, string) {
@@ -42,6 +43,7 @@ func parseFlags() (Config, string) {
 	flag.StringVar(&configFile, "c", "", "specify the configuration file")
 	flag.StringVar(&config.PackageName, "p", "", "specify the package name to trace")
 	flag.BoolVar(&config.Args, "a", false, "whether to trace arguments")
+	flag.BoolVar(&config.CaptureReply, "r", false, "whether to capture reply transactions")
 	flag.StringVar(&config.FileName, "f", "", "specify the log output file")
 
 	flag.Parse()
@@ -71,6 +73,9 @@ func mergeConfigs(flagConfig, fileConfig Config) Config {
 	}
 	if flagConfig.Args {
 		fileConfig.Args = flagConfig.Args
+	}
+	if flagConfig.CaptureReply {
+		fileConfig.CaptureReply = flagConfig.CaptureReply
 	}
 	if flagConfig.FileName != "" {
 		fileConfig.FileName = flagConfig.FileName
@@ -167,6 +172,9 @@ func main() {
 		uid = 0;
 	}
 	config_value.Uid = uint32(uid);
+	if conf.CaptureReply {
+		config_value.CaptureReply = 1
+	}
 	if err := objs.TraceConfigMap.Put(config_key, config_value); err != nil {
 		logger.Fatalf("写入 BPF 配置映射失败: %v", err)
 	}
@@ -238,9 +246,6 @@ func main() {
 			completeData := mergeChunks(transactionBuffers[event.TransactionId])
 			delete(transactionBuffers, event.TransactionId)
 
-			if len(completeData) <= 16 {
-				continue
-			}
 			if len(completeData) > ChunkSize*MaxChunks {
 				continue
 			}
@@ -250,6 +255,30 @@ func main() {
 				packageName = fmt.Sprintf("%d", event.Uid)
 			}
 
+			if event.Reply != 0 {
+				// Reply 事务处理
+				parcelData := completeData[:event.DataSize]
+				exceptionCode, err := ExtractReplyExceptionCode(parcelData)
+				exceptionStr := fmt.Sprintf("%d", exceptionCode)
+				if err != nil {
+					exceptionStr = "unknown"
+				} else if exceptionCode == 0 {
+					exceptionStr = "0(success)"
+				}
+
+				if conf.Args {
+					logger.Printf("[REPLY] (pid:%d, uid:%d, handle: %x, package:%s, exception:%s, data_size:%d)\n%s", event.Pid, event.Uid, event.Handle, packageName, exceptionStr, event.DataSize, spew.Sdump(parcelData))
+				} else {
+					logger.Printf("[REPLY] (pid:%d, uid:%d, handle: %x, package:%s, exception:%s, data_size:%d)\n", event.Pid, event.Uid, event.Handle, packageName, exceptionStr, event.DataSize)
+				}
+				continue
+			}
+
+			// Call 事务处理
+			if len(completeData) <= 16 {
+				continue
+			}
+
 			parcelData := completeData[:event.DataSize-1]
 
 			interfaceToken, err := ExtractInterfaceName(parcelData)
@@ -257,9 +286,9 @@ func main() {
 			if err != nil {
 				logger.Println("Error parsing parcel:", err)
 				if conf.Args {
-					logger.Printf("(pid:%d, uid:%d, handle: %x, package:%s, addr:%x, ret: %x)\n%s", event.Pid, event.Uid, event.Handle, packageName, event.Addr, event.Ret, spew.Sdump(parcelData))
+					logger.Printf("[CALL] (pid:%d, uid:%d, handle: %x, package:%s, addr:%x, ret: %x)\n%s", event.Pid, event.Uid, event.Handle, packageName, event.Addr, event.Ret, spew.Sdump(parcelData))
 				} else {
-					logger.Printf("(pid:%d, uid:%d, handle: %x, package:%s, addr:%x, ret: %x)\n", event.Pid, event.Uid, event.Handle, packageName, event.Addr, event.Ret)
+					logger.Printf("[CALL] (pid:%d, uid:%d, handle: %x, package:%s, addr:%x, ret: %x)\n", event.Pid, event.Uid, event.Handle, packageName, event.Addr, event.Ret)
 				}
 				continue
 			}
@@ -274,9 +303,9 @@ func main() {
 			}
 
 			if conf.Args {
-				logger.Printf("(pid:%d, uid:%d, handle: %x, package:%s, addr:%x, ret: %x) -> (interface:%s, method:%s)\n%s", event.Pid, event.Uid, event.Handle, packageName, event.Addr, event.Ret, interfaceToken, methodName, spew.Sdump(parcelData))
+				logger.Printf("[CALL] (pid:%d, uid:%d, handle: %x, package:%s, addr:%x, ret: %x) -> (interface:%s, method:%s)\n%s", event.Pid, event.Uid, event.Handle, packageName, event.Addr, event.Ret, interfaceToken, methodName, spew.Sdump(parcelData))
 			} else {
-				logger.Printf("(pid:%d, uid:%d, handle: %x, package:%s, addr:%x, ret: %x) -> (interface:%s, method:%s)\n", event.Pid, event.Uid, event.Handle, packageName, event.Addr, event.Ret, interfaceToken, methodName)
+				logger.Printf("[CALL] (pid:%d, uid:%d, handle: %x, package:%s, addr:%x, ret: %x) -> (interface:%s, method:%s)\n", event.Pid, event.Uid, event.Handle, packageName, event.Addr, event.Ret, interfaceToken, methodName)
 			}
 		}
 	}

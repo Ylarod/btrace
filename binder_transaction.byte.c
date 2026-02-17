@@ -14,12 +14,13 @@ struct trace_event {
     u32 uid;
     u32 code;
     u32 flags;
+    u32 reply;
+    u32 handle;
     u64 data_size;
     u64 transaction_id;
     u64 chunk_index;
     u64 addr;
     u64 ret;
-    u32 handle;
     u8 chunk_data[CHUNK_SIZE];
 };
 
@@ -30,6 +31,7 @@ struct {
 
 struct trace_config {
     u32 uid;
+    u32 capture_reply;
 };
 
 struct {
@@ -58,7 +60,7 @@ int kprobe_binder_transaction(struct pt_regs *ctx) {
     }
 
     int reply = PT_REGS_PARM4(ctx);
-    if (reply) {
+    if (reply && !conf->capture_reply) {
         return 0;
     }
 
@@ -118,10 +120,11 @@ int kprobe_binder_transaction(struct pt_regs *ctx) {
         binder_transaction_event->uid = current_uid;
         binder_transaction_event->code = code;
         binder_transaction_event->flags = flags;
+        binder_transaction_event->reply = (u32)reply;
+        binder_transaction_event->handle = handle;
         binder_transaction_event->data_size = data_size;
         binder_transaction_event->transaction_id = transaction_id;
         binder_transaction_event->chunk_index = i;
-        binder_transaction_event->handle = handle;
 		
         u64 chunk_size = ((i + 1) * CHUNK_SIZE > data_size) ? (data_size - i * CHUNK_SIZE) : CHUNK_SIZE;
 		unsigned probe_read_size = chunk_size < sizeof(binder_transaction_event->chunk_data) ? chunk_size : sizeof(binder_transaction_event->chunk_data);

@@ -1,4 +1,5 @@
 {
+    "capture_reply": false,
     "customMethods": {
         "android.content.pm.IBackgroundInstallControlService": {
             "1": "android.content.pm.ParceledListSlice getBackgroundInstalledPackages(long, int)"

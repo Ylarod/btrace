@@ -21,6 +21,16 @@ func ReadUTF16String(r io.Reader, length uint32) (string, error) {
 	return string(runes), nil
 }
 
+// ExtractReplyExceptionCode 从 Reply Parcel 中提取异常码
+// Reply Parcel 格式: [exception_code(4字节, int32)] [返回值数据...]
+// exception_code == 0 表示成功
+func ExtractReplyExceptionCode(data []byte) (int32, error) {
+	if len(data) < 4 {
+		return 0, errors.New("insufficient data for reply parcel")
+	}
+	return int32(binary.LittleEndian.Uint32(data[:4])), nil
+}
+
 // ExtractInterfaceName 从 Parcel 数据中提取接口名
 func ExtractInterfaceName(data []byte) (string, error) {
 	reader := bytes.NewReader(data)
